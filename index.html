@@ -1,0 +1,448 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Blox Obby - Player Noob</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #87CEEB; /* Sky blue */
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            touch-action: none; /* Prevent scrolling on mobile */
+        }
+        #ui {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: white;
+            font-weight: bold;
+            font-size: 18px;
+            text-shadow: 2px 2px 0 #000;
+            pointer-events: none;
+            z-index: 10;
+        }
+        #win {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: #00FF00;
+            font-weight: bold;
+            font-size: 60px;
+            text-shadow: 4px 4px 0 #000;
+            display: none;
+            pointer-events: none;
+            z-index: 10;
+        }
+        #mobile-controls {
+            display: none;
+            position: absolute;
+            bottom: 20px;
+            width: 100%;
+            justify-content: space-between;
+            padding: 0 20px;
+            box-sizing: border-box;
+            z-index: 10;
+        }
+        .joystick-area {
+            width: 120px;
+            height: 120px;
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 50%;
+            position: relative;
+        }
+        .joystick-knob {
+            width: 50px;
+            height: 50px;
+            background: rgba(255, 255, 255, 0.5);
+            border-radius: 50%;
+            position: absolute;
+            top: 35px;
+            left: 35px;
+        }
+        .jump-btn {
+            width: 80px;
+            height: 80px;
+            background: rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: bold;
+            user-select: none;
+        }
+        @media (max-width: 768px) {
+            #mobile-controls { display: flex; }
+            #ui { font-size: 14px; }
+        }
+    </style>
+    <!-- Import Three.js Library -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+</head>
+<body>
+    <div id="ui">Controls: WASD / Arrows to Move | SPACE to Jump<br>Avoid Red Lava Blocks!</div>
+    <div id="win">YOU WIN!</div>
+    
+    <div id="mobile-controls">
+        <div class="joystick-area" id="joystick">
+            <div class="joystick-knob" id="knob"></div>
+        </div>
+        <div class="jump-btn" id="jumpBtn">JUMP</div>
+    </div>
+
+    <script>
+        window.onload = function () {
+            // 1. Scene Setup
+            const scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x87CEEB); // Sky color
+
+            // Add some fog for depth
+            scene.fog = new THREE.Fog(0x87CEEB, 20, 100);
+
+            const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            const renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.shadowMap.enabled = true;
+            document.body.appendChild(renderer.domElement);
+
+            // 2. Lighting
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+            scene.add(ambientLight);
+            
+            const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            dirLight.position.set(20, 40, 20);
+            dirLight.castShadow = true;
+            dirLight.shadow.camera.left = -50;
+            dirLight.shadow.camera.right = 50;
+            dirLight.shadow.camera.top = 50;
+            dirLight.shadow.camera.bottom = -50;
+            scene.add(dirLight);
+
+            // 3. Build the "Noob" Player
+            const player = new THREE.Group();
+            
+            // Classic Noob Colors
+            const yellowMat = new THREE.MeshLambertMaterial({ color: 0xf6d152 });
+            const greenMat = new THREE.MeshLambertMaterial({ color: 0x00b539 });
+            const blueMat = new THREE.MeshLambertMaterial({ color: 0x00509d });
+
+            // Body Parts
+            const head = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), yellowMat);
+            head.position.y = 2.5;
+            head.castShadow = true;
+            
+            const torso = new THREE.Mesh(new THREE.BoxGeometry(2, 2, 1), greenMat);
+            torso.position.y = 1;
+            torso.castShadow = true;
+            
+            const armL = new THREE.Mesh(new THREE.BoxGeometry(0.8, 2, 1), yellowMat);
+            armL.position.set(-1.4, 1, 0);
+            armL.castShadow = true;
+            
+            const armR = new THREE.Mesh(new THREE.BoxGeometry(0.8, 2, 1), yellowMat);
+            armR.position.set(1.4, 1, 0);
+            armR.castShadow = true;
+            
+            const legL = new THREE.Mesh(new THREE.BoxGeometry(0.9, 2, 1), blueMat);
+            legL.position.set(-0.5, -1, 0);
+            legL.castShadow = true;
+            
+            const legR = new THREE.Mesh(new THREE.BoxGeometry(0.9, 2, 1), blueMat);
+            legR.position.set(0.5, -1, 0);
+            legR.castShadow = true;
+
+            player.add(head, torso, armL, armR, legL, legR);
+            scene.add(player);
+
+            // Player logic variables
+            let velocityY = 0;
+            const gravity = -0.018;
+            const jumpForce = 0.4;
+            const moveSpeed = 0.2;
+            let isGrounded = false;
+            let gameWon = false;
+            const playerHalfWidth = 1; // Approximate half width/depth of player
+
+            // 4. Build the Obby (Obstacles)
+            const platforms = [];
+            
+            function createPlatform(x, y, z, width, depth, color = 0xaaaaaa, type = 'normal') {
+                const geo = new THREE.BoxGeometry(width, 1, depth);
+                const mat = new THREE.MeshLambertMaterial({ color: color });
+                const mesh = new THREE.Mesh(geo, mat);
+                mesh.position.set(x, y, z);
+                mesh.receiveShadow = true;
+                mesh.castShadow = true;
+                scene.add(mesh);
+                
+                const platformObj = { mesh, width, depth, y, type, initialX: x };
+                platforms.push(platformObj);
+                return platformObj;
+            }
+
+            // --- The Course Design ---
+            const startZ = 0;
+            // Spawn Point
+            createPlatform(0, 0, startZ, 8, 8, 0x555555, 'spawn'); 
+            
+            // Basic jumps
+            createPlatform(0, 1, startZ - 8, 4, 4, 0x888888); 
+            createPlatform(0, 2, startZ - 16, 3, 3, 0x888888);
+            
+            // Lava trap
+            createPlatform(0, 2, startZ - 22, 8, 3, 0xff0000, 'lava'); // Red Lava
+            createPlatform(-4, 3, startZ - 28, 3, 3, 0x00aaff); // Safe jump left
+            createPlatform(4, 4, startZ - 34, 3, 3, 0x00aaff);  // Safe jump right
+            
+            // Moving platform gap
+            const movingPlat = createPlatform(0, 4, startZ - 42, 4, 4, 0xffaa00, 'moving');
+            
+            // Lava bridge
+            createPlatform(0, 4, startZ - 50, 2, 2, 0x888888);
+            createPlatform(0, 4, startZ - 54, 2, 2, 0xff0000, 'lava');
+            createPlatform(0, 4, startZ - 58, 2, 2, 0x888888);
+            createPlatform(0, 4, startZ - 62, 2, 2, 0xff0000, 'lava');
+            createPlatform(0, 5, startZ - 66, 3, 3, 0x888888);
+            
+            // Narrow beam
+            createPlatform(0, 6, startZ - 74, 1, 8, 0xaa00ff);
+            
+            // Finish Line
+            createPlatform(0, 6, startZ - 85, 8, 8, 0x00ff00, 'win');
+
+            // 5. Input Controls
+            const keys = { w: false, a: false, s: false, d: false, space: false };
+            let joystickDelta = { x: 0, y: 0 };
+
+            // Keyboard
+            window.addEventListener('keydown', (e) => {
+                if (e.code === 'KeyW' || e.code === 'ArrowUp') keys.w = true;
+                if (e.code === 'KeyS' || e.code === 'ArrowDown') keys.s = true;
+                if (e.code === 'KeyA' || e.code === 'ArrowLeft') keys.a = true;
+                if (e.code === 'KeyD' || e.code === 'ArrowRight') keys.d = true;
+                if (e.code === 'Space') keys.space = true;
+            });
+            window.addEventListener('keyup', (e) => {
+                if (e.code === 'KeyW' || e.code === 'ArrowUp') keys.w = false;
+                if (e.code === 'KeyS' || e.code === 'ArrowDown') keys.s = false;
+                if (e.code === 'KeyA' || e.code === 'ArrowLeft') keys.a = false;
+                if (e.code === 'KeyD' || e.code === 'ArrowRight') keys.d = false;
+                if (e.code === 'Space') keys.space = false;
+            });
+
+            // Touch Controls
+            const jumpBtn = document.getElementById('jumpBtn');
+            jumpBtn.addEventListener('touchstart', (e) => { e.preventDefault(); keys.space = true; }, {passive: false});
+            jumpBtn.addEventListener('touchend', (e) => { e.preventDefault(); keys.space = false; }, {passive: false});
+
+            const joystick = document.getElementById('joystick');
+            const knob = document.getElementById('knob');
+            let isDragging = false;
+            let joystickCenter = { x: 0, y: 0 };
+
+            joystick.addEventListener('touchstart', (e) => {
+                e.preventDefault();
+                isDragging = true;
+                const rect = joystick.getBoundingClientRect();
+                joystickCenter = { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+                updateJoystick(e.touches[0]);
+            }, {passive: false});
+
+            joystick.addEventListener('touchmove', (e) => {
+                e.preventDefault();
+                if (isDragging) updateJoystick(e.touches[0]);
+            }, {passive: false});
+
+            const endDrag = (e) => {
+                e.preventDefault();
+                isDragging = false;
+                knob.style.transform = `translate(0px, 0px)`;
+                joystickDelta = { x: 0, y: 0 };
+            };
+            joystick.addEventListener('touchend', endDrag);
+            joystick.addEventListener('touchcancel', endDrag);
+
+            function updateJoystick(touch) {
+                let dx = touch.clientX - joystickCenter.x;
+                let dy = touch.clientY - joystickCenter.y;
+                const distance = Math.sqrt(dx * dx + dy * dy);
+                const maxRadius = 35;
+                
+                if (distance > maxRadius) {
+                    dx = (dx / distance) * maxRadius;
+                    dy = (dy / distance) * maxRadius;
+                }
+                
+                knob.style.transform = `translate(${dx}px, ${dy}px)`;
+                
+                // Normalize for movement (-1 to 1)
+                joystickDelta.x = dx / maxRadius;
+                joystickDelta.y = dy / maxRadius;
+            }
+
+            function resetPlayer() {
+                player.position.set(0, 5, 0);
+                velocityY = 0;
+            }
+            resetPlayer();
+
+            // 6. Game Loop
+            let time = 0;
+
+            function animate() {
+                requestAnimationFrame(animate);
+                time += 0.02;
+
+                if (!gameWon) {
+                    // Moving platforms logic
+                    platforms.forEach(plat => {
+                        if (plat.type === 'moving') {
+                            plat.mesh.position.x = plat.initialX + Math.sin(time) * 5;
+                        }
+                    });
+
+                    // Input movement mapping
+                    let moveX = 0;
+                    let moveZ = 0;
+
+                    if (keys.w) moveZ -= moveSpeed;
+                    if (keys.s) moveZ += moveSpeed;
+                    if (keys.a) moveX -= moveSpeed;
+                    if (keys.d) moveX += moveSpeed;
+
+                    // Apply joystick movement if active
+                    if (Math.abs(joystickDelta.x) > 0 || Math.abs(joystickDelta.y) > 0) {
+                        moveX = joystickDelta.x * moveSpeed;
+                        moveZ = joystickDelta.y * moveSpeed;
+                    }
+
+                    player.position.x += moveX;
+                    player.position.z += moveZ;
+
+                    // Animate arms/legs when moving
+                    if (Math.abs(moveX) > 0 || Math.abs(moveZ) > 0) {
+                        legL.rotation.x = Math.sin(time * 15) * 0.5;
+                        legR.rotation.x = -Math.sin(time * 15) * 0.5;
+                        armL.rotation.x = -Math.sin(time * 15) * 0.5;
+                        armR.rotation.x = Math.sin(time * 15) * 0.5;
+                    } else {
+                        legL.rotation.x = 0;
+                        legR.rotation.x = 0;
+                        armL.rotation.x = 0;
+                        armR.rotation.x = 0;
+                    }
+
+                    // Jumping
+                    if (keys.space && isGrounded) {
+                        velocityY = jumpForce;
+                        isGrounded = false;
+                    }
+
+                    // Apply Gravity
+                    velocityY += gravity;
+                    player.position.y += velocityY;
+
+                    // Collision Detection
+                    isGrounded = false;
+                    const playerFeetY = player.position.y - 2; // Bottom of the noob's legs
+                    
+                    let onMovingPlatform = false;
+                    let movingPlatDX = 0;
+
+                    for (let plat of platforms) {
+                        const px = player.position.x;
+                        const pz = player.position.z;
+                        const platX = plat.mesh.position.x;
+                        const platZ = plat.mesh.position.z;
+
+                        // Check AABB collision (Top down X/Z)
+                        if (Math.abs(px - platX) < (plat.width / 2) + playerHalfWidth && 
+                            Math.abs(pz - platZ) < (plat.depth / 2) + playerHalfWidth) {
+                            
+                            // Check Y collision (Landing)
+                            // Allow a small threshold to snap to top
+                            const platformTop = plat.mesh.position.y + 0.5;
+                            
+                            if (velocityY <= 0 && playerFeetY <= platformTop && playerFeetY > platformTop - 1.5) {
+                                
+                                // Lava Check
+                                if (plat.type === 'lava') {
+                                    resetPlayer();
+                                    break;
+                                }
+
+                                isGrounded = true;
+                                velocityY = 0;
+                                player.position.y = platformTop + 2; // Snap to top of platform
+                                
+                                // Stick to moving platform
+                                if (plat.type === 'moving') {
+                                    const prevX = plat.initialX + Math.sin(time - 0.02) * 5;
+                                    const currX = plat.mesh.position.x;
+                                    player.position.x += (currX - prevX);
+                                }
+                                
+                                // Win Check
+                                if (plat.type === 'win') {
+                                    gameWon = true;
+                                    document.getElementById('win').style.display = 'block';
+                                    
+                                    // Make the Noob dance
+                                    setInterval(() => {
+                                        player.rotation.y += 0.1;
+                                        armL.rotation.x = Math.PI;
+                                        armR.rotation.x = Math.PI;
+                                        player.position.y += Math.sin(Date.now() * 0.01) * 0.05;
+                                    }, 16);
+                                }
+                                break; // Found the platform we are standing on, stop checking
+                            }
+                        }
+                    }
+
+                    // Reset if falling into the void
+                    if (player.position.y < -15) {
+                        resetPlayer();
+                    }
+                }
+
+                // Camera Follow logic (Smooth follow behind and above player)
+                const targetCamPos = new THREE.Vector3(
+                    player.position.x,
+                    player.position.y + 6,
+                    player.position.z + 12
+                );
+                
+                // Look slightly ahead of the player
+                const targetLookAt = new THREE.Vector3(
+                    player.position.x,
+                    player.position.y + 2,
+                    player.position.z - 4
+                );
+
+                camera.position.lerp(targetCamPos, 0.1);
+                
+                // Create a temporary object to lerp the lookAt target
+                if(!window.camLookTarget) window.camLookTarget = targetLookAt.clone();
+                window.camLookTarget.lerp(targetLookAt, 0.1);
+                camera.lookAt(window.camLookTarget);
+
+                renderer.render(scene, camera);
+            }
+
+            // Handle Window Resize
+            window.addEventListener('resize', () => {
+                camera.aspect = window.innerWidth / window.innerHeight;
+                camera.updateProjectionMatrix();
+                renderer.setSize(window.innerWidth, window.innerHeight);
+            });
+
+            // Start Animation Loop
+            animate();
+        };
+    </script>
+</body>
+</html>
